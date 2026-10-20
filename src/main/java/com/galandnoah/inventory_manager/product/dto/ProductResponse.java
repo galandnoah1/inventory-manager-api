@@ -10,9 +10,10 @@ import java.util.Date;
 @Getter
 @Setter
 public class ProductResponse {
+    private Integer id;
     private String designation;
-    private String purchasePrice;
-    private String sellingPrice;
+    private Double purchasePrice;
+    private Double sellingPrice;
     private Integer sellingQty;
     private Double totalSelling;
     private Double margin;

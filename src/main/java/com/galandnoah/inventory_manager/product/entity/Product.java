@@ -3,7 +3,7 @@ package com.galandnoah.inventory_manager.product.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.Objects;
 
 @Entity
@@ -22,8 +22,8 @@ public class Product {
     private Integer sellingQty;
     private Integer stock;
     private Integer threshold;
-    private Date created;
-    private Date updated;
+    private LocalDate created;
+    private LocalDate updated;
 
     @Override
     public boolean equals(Object o) {

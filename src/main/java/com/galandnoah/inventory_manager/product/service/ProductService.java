@@ -3,7 +3,9 @@ package com.galandnoah.inventory_manager.product.service;
 import com.galandnoah.inventory_manager.product.dto.ProductRequest;
 import com.galandnoah.inventory_manager.product.dto.ProductResponse;
 import com.galandnoah.inventory_manager.product.dto.UpdateProductRequest;
-import org.springframework.data.domain.Page;
+
+
+import java.util.List;
 
 public interface ProductService {
 
@@ -11,7 +13,7 @@ public interface ProductService {
 
     ProductResponse findProductById(Integer productId);
 
-    Page<ProductResponse> findAllProduct(int size, int page);
+    List<ProductResponse> findAllProduct(int size, int page);
 
     ProductResponse updateProduct(Integer productId, UpdateProductRequest updateProductRequest);
 
@@ -19,5 +21,5 @@ public interface ProductService {
 
     void decrementStock(Integer productId, int qty);
 
-    void updateProductPurchasePrice(Integer productId, Double price);
+    void setPurchasePrice(Integer productId, Double price);
 }

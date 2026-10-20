@@ -12,6 +12,10 @@ public record ProductRequest(
         @Positive(message = "Le prix de vente doit être positif")
         Double sellingPrice,
 
+        @NotNull(message = "Entrer le prix d'achat du produit")
+        @Positive(message = "Le prix d'achat doit être positif")
+        Double purchasePrice,
+
         @NotNull(message = "Entrer la quantité de produit disponible")
         @Positive(message = "La valeur du stock doit être positif")
         Integer stock,
