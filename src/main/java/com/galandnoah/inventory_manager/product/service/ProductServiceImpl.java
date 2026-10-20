@@ -194,7 +194,7 @@ public class ProductServiceImpl implements ProductService {
             throw new RuntimeException("Insufficient stock");
         }
 
-        product.setStock(product.getStock() + qty);
+        product.setStock(product.getStock() - qty);
 
         Product saved = productRepository.save(product);
 
@@ -222,6 +222,22 @@ public class ProductServiceImpl implements ProductService {
         log.info("Purchase price updated with success: {}", saved.getPurchasePrice());
     }
 
+    @Transactional
+    public void incrementSellingQty(Integer productId, int qty)
+    {
+        log.info("Increment selling qty");
+
+        Product product = productRepository.findById(productId)
+                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+
+        int oldSellingQty = product.getSellingQty();
+
+        int newSellingQty = oldSellingQty + qty;
+
+        product.setSellingQty(newSellingQty);
+
+        productRepository.save(product);
+    }
 
 
 }
