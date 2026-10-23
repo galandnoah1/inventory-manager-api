@@ -1,5 +1,6 @@
 package com.galandnoah.inventory_manager.sale.service;
 
+import com.galandnoah.inventory_manager.exception.InvalidRequestException;
 import com.galandnoah.inventory_manager.product.entity.Product;
 import com.galandnoah.inventory_manager.product.repository.ProductRepository;
 import com.galandnoah.inventory_manager.product.service.ProductServiceImpl;
@@ -18,12 +19,12 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class SaleServiceImpl implements SaleService{
+public class SaleServiceImpl implements SaleService {
+
     private final SaleRepository saleRepository;
     private final ProductServiceImpl productService;
     private final ProductRepository productRepository;
@@ -35,29 +36,40 @@ public class SaleServiceImpl implements SaleService{
     @CacheEvict(cacheNames = {"products", "allProducts", "sales", "allSales"}, allEntries = true)
     public SaleResponse createSale(SaleRequest saleRequest) {
 
-        log.info("Create sale");
+        log.info("Create sale. product: {}, qty: {}", saleRequest.productId(), saleRequest.qty());
 
-        Sale sale = saleMapper.toEntity(saleRequest);
+        if (saleRequest.productId() == null)
+        {
+            throw new InvalidRequestException("Product is required");
+        }
+
+        if (saleRequest.amount() != null && saleRequest.amount() < 0)
+        {
+            throw new InvalidRequestException("Amount cannot be negative");
+        }
 
         Product product = productRepository.findById(saleRequest.productId())
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+                .orElseThrow(() -> {
+                    log.warn("Product not found: {}", saleRequest.productId());
+                    return new EntityNotFoundException(
+                            "Product not found with id: " + saleRequest.productId());
+                });
 
+        // Throws InvalidRequestException if qty <= 0
+        // and InsufficientStockException if qty > available stock
+        productService.decrementStock(product.getId(), saleRequest.qty());
+        productService.incrementSellingQty(product.getId(), saleRequest.qty());
+
+        Sale sale = saleMapper.toEntity(saleRequest);
         sale.setProduct(product);
 
-        if (product.getStock() <= saleRequest.qty() || product.getStock() == 0)
-        {
-            log.warn("Stock insuffisant");
-            throw new RuntimeException("Insufficient stock");
-        }
+        // Custom amount if provided, otherwise qty x selling price
+        double amount = saleRequest.amount() != null
+                ? saleRequest.amount()
+                : saleRequest.qty() * product.getSellingPrice();
 
-        if (saleRequest.amount() == null){
-
-            productService.decrementStock(product.getId(), saleRequest.qty());
-            productService.incrementSellingQty(product.getId(), saleRequest.qty());
-            sale.setAmount(saleRequest.qty() * product.getSellingPrice());
-        }
-
-        sale.setPaid(saleRequest.paid());
+        sale.setAmount(amount);
+        sale.setPaid(Boolean.TRUE.equals(saleRequest.paid()));
         sale.setCreated(LocalDate.now());
 
         Sale saved = saleRepository.save(sale);
@@ -68,20 +80,28 @@ public class SaleServiceImpl implements SaleService{
     }
 
     @Override
-    @Cacheable(value = "allSales", key = "#page")
+    @Cacheable(value = "allSales", key = "#page + '-' + #size")
     @Transactional
     public List<SaleResponse> findSales(int size, int page) {
 
-        log.info("Find sales with pagination");
-        int offset = (page - 1)*size;
+        log.info("Find sales with pagination. page: {}, size: {}", page, size);
 
-        List<Sale> sales = saleRepository.findSales(size, offset);
+        if (page < 1)
+        {
+            throw new InvalidRequestException("Page must be greater than or equal to 1");
+        }
 
+        if (size < 1)
+        {
+            throw new InvalidRequestException("Size must be greater than or equal to 1");
+        }
 
-        return sales
+        int offset = (page - 1) * size;
+
+        return saleRepository.findSales(size, offset)
                 .stream()
                 .map(saleMapper::toResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
@@ -89,13 +109,11 @@ public class SaleServiceImpl implements SaleService{
     @Transactional
     public List<SaleResponse> findSalesByDate(LocalDate date) {
 
-        log.info("Find sales by date");
+        log.info("Find sales by date: {}", date);
 
-        List<Sale> sales = saleRepository.findByCreated(date);
-
-        return sales
+        return saleRepository.findByCreated(date)
                 .stream()
                 .map(saleMapper::toResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 }
