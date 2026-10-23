@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.repository.query.Param;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -28,7 +28,7 @@ public class SaleController {
     @Operation(description = "Save sale")
     public ResponseEntity<SaleResponse> create(
             @Valid @RequestBody SaleRequest saleRequest
-            ){
+    ) {
 
         log.info("POST /api/v1/sales - create sale");
 
@@ -40,11 +40,11 @@ public class SaleController {
     }
 
     @GetMapping
-    @Operation(description = "Retrieve all sales")
+    @Operation(description = "Retrieve all sales (paginated, page starts at 1)")
     public ResponseEntity<List<SaleResponse>> findAll(
-            @Param("size") int size, @Param("page") int page
-    )
-    {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "1") int page
+    ) {
         log.info("GET /api/v1/sales?size={}&page={}", size, page);
 
         List<SaleResponse> sales = saleService.findSales(size, page);
@@ -53,14 +53,13 @@ public class SaleController {
     }
 
     @GetMapping("/{date}")
-    @Operation(description = "Retrieve all sales")
+    @Operation(description = "Retrieve sales by date (format yyyy-MM-dd)")
     public ResponseEntity<List<SaleResponse>> findByDate(
-           @PathVariable String date
-    )
-    {
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
         log.info("GET /api/v1/sales/{}", date);
 
-        List<SaleResponse> sales = saleService.findSalesByDate(LocalDate.parse(date));
+        List<SaleResponse> sales = saleService.findSalesByDate(date);
 
         return ResponseEntity.ok(sales);
     }
