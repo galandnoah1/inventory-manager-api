@@ -1,5 +1,8 @@
 package com.galandnoah.inventory_manager.product.service;
 
+import com.galandnoah.inventory_manager.exception.DuplicateResourceException;
+import com.galandnoah.inventory_manager.exception.InsufficientStockException;
+import com.galandnoah.inventory_manager.exception.InvalidRequestException;
 import com.galandnoah.inventory_manager.product.dto.ProductRequest;
 import com.galandnoah.inventory_manager.product.dto.ProductResponse;
 import com.galandnoah.inventory_manager.product.dto.UpdateProductRequest;
@@ -8,7 +11,7 @@ import com.galandnoah.inventory_manager.product.mapper.ProductMapper;
 import com.galandnoah.inventory_manager.product.repository.ProductRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -16,7 +19,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 
 /**
@@ -24,7 +26,7 @@ import java.util.Map;
  * Author: Galand Noah
  * */
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Slf4j
 public class ProductServiceImpl implements ProductService {
 
@@ -32,53 +34,32 @@ public class ProductServiceImpl implements ProductService {
     private final ProductMapper productMapper;
 
     @Transactional
-    @CacheEvict(
-            cacheNames = {"products", "allProducts"},
-            allEntries = true
-    )
+    @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public ProductResponse createProduct(ProductRequest productRequest)
     {
-        log.info("Add  product in catalog : {}", productRequest.designation());
+        log.info("Add product in catalog : {}", productRequest.designation());
 
         if (productRepository.existsByDesignationIgnoreCase(productRequest.designation()))
         {
-            log.warn("Product already exists");
-            throw new RuntimeException("Product already exists");
+            log.warn("Product already exists: {}", productRequest.designation());
+            throw new DuplicateResourceException(
+                    "Product already exists: " + productRequest.designation());
         }
 
         Product product = productMapper.toEntity(productRequest);
         product.setCreated(LocalDate.now());
-        product.setSellingQty(0);
         product.setUpdated(LocalDate.now());
+        product.setSellingQty(0);
 
         Product saved = productRepository.save(product);
 
         log.info("Product added with success");
 
-        ProductResponse response =  productMapper.toResponse(saved);
+        ProductResponse response = productMapper.toResponse(saved);
         response.setId(saved.getId());
-        Map<String , Double> margins = calculateMargin(saved);
-
-        response.setMargin(margins.get("margin"));
-        response.setTotalMargin(margins.get("totalMargin"));
-        response.setTotalSelling(response.getSellingQty() * response.getSellingPrice());
-        response.setValue(response.getStock() * response.getPurchasePrice());
+        accounting(response);
 
         return response;
-    }
-
-    private Map<String, Double> calculateMargin(Product product)
-    {
-        Double sellingPrice = product.getSellingPrice();
-        Double purchasePrice = product.getPurchasePrice();
-        Double sellingQty = product.getSellingQty() != null ? product.getSellingQty() : 0.0;
-        Double margin = sellingPrice - purchasePrice;
-        Double totalMargin = sellingQty * margin;
-
-        return Map.of(
-                "margin", margin,
-                "totalMargin", totalMargin
-        );
     }
 
     @Override
@@ -87,41 +68,36 @@ public class ProductServiceImpl implements ProductService {
 
         log.info("Find product : {}", productId);
 
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+        Product product = getProductOrThrow(productId);
 
         ProductResponse productResponse = productMapper.toResponse(product);
 
-        productResponse.setMargin(productResponse.getSellingPrice() - productResponse.getPurchasePrice());
-        productResponse.setTotalMargin(productResponse.getMargin() * productResponse.getSellingQty());
-        productResponse.setTotalSelling(productResponse.getSellingPrice() * productResponse.getSellingQty());
-        productResponse.setValue(productResponse.getStock() * productResponse.getPurchasePrice());
+        accounting(productResponse);
 
         return productResponse;
     }
 
     @Override
-    @Cacheable(value = "allProducts", key = "#page")
+    @Cacheable(value = "allProducts", key = "#page + '-' + #size")
     public List<ProductResponse> findAllProduct(int size, int page) {
 
-        log.info("Find all product");
+        log.info("Find all product. page: {}, size: {}", page, size);
 
-        int offset = (page - 1 ) * size;
+        if (page < 1)
+        {
+            throw new InvalidRequestException("Page must be greater than or equal to 1");
+        }
+
+        if (size < 1)
+        {
+            throw new InvalidRequestException("Size must be greater than or equal to 1");
+        }
+
+        int offset = (page - 1) * size;
 
         List<Product> products = productRepository.findProducts(size, offset);
 
-        List<ProductResponse> productResponses = products
-                .stream()
-                .map(productMapper::toResponse)
-                .toList();
-
-        productResponses.forEach(p -> {
-            p.setMargin(p.getSellingPrice() - p.getPurchasePrice());
-            p.setTotalMargin(p.getMargin()*p.getSellingQty());
-            p.setTotalSelling(p.getSellingQty()*p.getSellingPrice());
-            p.setValue(p.getStock()*p.getPurchasePrice());
-        });
-        return productResponses;
+        return accounting(products);
     }
 
     @Override
@@ -129,93 +105,116 @@ public class ProductServiceImpl implements ProductService {
     @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public ProductResponse updateProduct(Integer productId, UpdateProductRequest updateProductRequest) {
 
-        log.info("Update product");
+        log.info("Update product : {}", productId);
 
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+        Product product = getProductOrThrow(productId);
 
         if (updateProductRequest.getStock() != null)
         {
+            if (updateProductRequest.getStock() < 0)
+            {
+                throw new InvalidRequestException("Stock cannot be negative");
+            }
+
             log.info("Update stock");
             product.setStock(updateProductRequest.getStock());
         }
 
         if (updateProductRequest.getDesignation() != null)
         {
+            String designation = updateProductRequest.getDesignation().trim();
+
+            if (designation.isEmpty())
+            {
+                throw new InvalidRequestException("Designation cannot be blank");
+            }
+
+            boolean designationChanged = !designation.equalsIgnoreCase(product.getDesignation());
+
+            if (designationChanged && productRepository.existsByDesignationIgnoreCase(designation))
+            {
+                log.warn("Product already exists: {}", designation);
+                throw new DuplicateResourceException("Product already exists: " + designation);
+            }
+
             log.info("Change designation");
-            product.setDesignation(updateProductRequest.getDesignation());
+            product.setDesignation(designation);
         }
+
+        product.setUpdated(LocalDate.now());
 
         Product saved = productRepository.save(product);
 
-        return productMapper.toResponse(saved);
+        ProductResponse response = productMapper.toResponse(saved);
+        accounting(response);
+
+        return response;
     }
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public void incrementStock(Integer productId, int qty) {
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
 
-        log.info("Increment stock : +{}, qty : {}", product.getStock(), qty);
+        log.info("Increment stock. product: {}, qty: +{}", productId, qty);
 
+        validateQuantity(qty);
 
-        if (qty <= 0)
-        {
-            throw new IllegalArgumentException("Quantity must be positive");
-        }
-
+        Product product = getProductOrThrow(productId);
 
         product.setStock(product.getStock() + qty);
+        product.setUpdated(LocalDate.now());
 
         Product saved = productRepository.save(product);
 
-        log.info("Stock incremented with success. stock: {}", saved.getStock() );
+        log.info("Stock incremented with success. stock: {}", saved.getStock());
     }
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public void decrementStock(Integer productId, int qty) {
 
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+        log.info("Decrement stock. product: {}, qty: -{}", productId, qty);
 
-        log.info("Decrement stock : +{}, qty : {}", product.getStock(), qty);
+        validateQuantity(qty);
 
-        if (qty <= 0)
+        Product product = getProductOrThrow(productId);
+
+        if (qty > product.getStock())
         {
-            throw new IllegalArgumentException("Quantity must be positive");
-        }
-
-
-        if(qty > product.getStock())
-        {
-            log.warn("Insufficient stock");
-            throw new RuntimeException("Insufficient stock");
+            log.warn("Insufficient stock. product: {}, available: {}, requested: {}",
+                    productId, product.getStock(), qty);
+            throw new InsufficientStockException(
+                    "Insufficient stock for product '" + product.getDesignation()
+                            + "': available " + product.getStock() + ", requested " + qty);
         }
 
         product.setStock(product.getStock() - qty);
+        product.setUpdated(LocalDate.now());
 
         Product saved = productRepository.save(product);
 
-        log.info("Stock decremented with success. stock: {}", saved.getStock() );
+        log.info("Stock decremented with success. stock: {}", saved.getStock());
     }
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public void setPurchasePrice(Integer productId, Double price) {
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+
+        if (price == null || price < 0)
+        {
+            log.warn("Invalid price: {}", price);
+            throw new InvalidRequestException("Price cannot be null or negative");
+        }
+
+        Product product = getProductOrThrow(productId);
 
         log.info("Update product purchase price: {}", product.getDesignation());
 
-        if (price < 0)
-        {
-            log.warn("Negative price");
-            throw new IllegalArgumentException("Price must be positive");
-        }
-
         product.setPurchasePrice(price);
+        product.setUpdated(LocalDate.now());
 
         Product saved = productRepository.save(product);
 
@@ -223,21 +222,61 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"products", "allProducts"}, allEntries = true)
     public void incrementSellingQty(Integer productId, int qty)
     {
-        log.info("Increment selling qty");
+        log.info("Increment selling qty. product: {}, qty: +{}", productId, qty);
 
-        Product product = productRepository.findById(productId)
-                .orElseThrow(()-> new EntityNotFoundException("Product not found"));
+        validateQuantity(qty);
 
-        int oldSellingQty = product.getSellingQty();
+        Product product = getProductOrThrow(productId);
 
-        int newSellingQty = oldSellingQty + qty;
+        int oldSellingQty = product.getSellingQty() != null ? product.getSellingQty() : 0;
 
-        product.setSellingQty(newSellingQty);
+        product.setSellingQty(oldSellingQty + qty);
+        product.setUpdated(LocalDate.now());
 
         productRepository.save(product);
     }
 
 
+    public List<ProductResponse> accounting(List<Product> products)
+    {
+        List<ProductResponse> productResponses = products
+                .stream()
+                .map(productMapper::toResponse)
+                .toList();
+
+        productResponses.forEach(this::accounting);
+
+        return productResponses;
+    }
+
+    public void accounting(ProductResponse productResponse)
+    {
+        productResponse.setMargin(productResponse.getSellingPrice() - productResponse.getPurchasePrice());
+        productResponse.setTotalMargin(productResponse.getMargin() * productResponse.getSellingQty());
+        productResponse.setTotalSelling(productResponse.getSellingPrice() * productResponse.getSellingQty());
+        productResponse.setValue(productResponse.getStock() * productResponse.getPurchasePrice());
+    }
+
+    // ---------- helpers ----------
+
+    private Product getProductOrThrow(Integer productId)
+    {
+        return productRepository.findById(productId)
+                .orElseThrow(() -> {
+                    log.warn("Product not found: {}", productId);
+                    return new EntityNotFoundException("Product not found with id: " + productId);
+                });
+    }
+
+    private void validateQuantity(int qty)
+    {
+        if (qty <= 0)
+        {
+            log.warn("Invalid quantity: {}", qty);
+            throw new InvalidRequestException("Quantity must be positive");
+        }
+    }
 }
