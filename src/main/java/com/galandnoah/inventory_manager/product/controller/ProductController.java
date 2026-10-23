@@ -7,7 +7,7 @@ import com.galandnoah.inventory_manager.product.service.ProductServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/products")
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Catalog management API")
 public class ProductController {
@@ -28,8 +28,7 @@ public class ProductController {
     @Operation(description = "Add product in catalog")
     public ResponseEntity<ProductResponse> create(
             @Valid @RequestBody ProductRequest productRequest
-            )
-    {
+    ) {
         log.info("POST /api/v1/products");
 
         ProductResponse response = productService.createProduct(productRequest);
@@ -43,8 +42,7 @@ public class ProductController {
     @Operation(description = "Find product by id")
     public ResponseEntity<ProductResponse> findById(
             @PathVariable Integer id
-    )
-    {
+    ) {
         log.info("GET /api/v1/products/{}", id);
 
         ProductResponse response = productService.findProductById(id);
@@ -53,10 +51,12 @@ public class ProductController {
     }
 
     @GetMapping
-    @Operation(description = "Find all product")
-    public ResponseEntity<List<ProductResponse>> findAll(int size, int page)
-    {
-        log.info("GET /api/v1/products");
+    @Operation(description = "Find all products (paginated, page starts at 1)")
+    public ResponseEntity<List<ProductResponse>> findAll(
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "1") int page
+    ) {
+        log.info("GET /api/v1/products?size={}&page={}", size, page);
 
         List<ProductResponse> responses = productService.findAllProduct(size, page);
 
@@ -64,14 +64,14 @@ public class ProductController {
     }
 
     @PutMapping("/{id}")
-    @Operation(description = "Update product")
+    @Operation(description = "Update product stock and/or designation")
     public ResponseEntity<ProductResponse> update(
             @PathVariable Integer id,
             @Valid @RequestBody UpdateProductRequest updateProductRequest
-            ){
+    ) {
         log.info("PUT /api/v1/products/{}", id);
 
-        ProductResponse response = productService.updateProduct(id,updateProductRequest);
+        ProductResponse response = productService.updateProduct(id, updateProductRequest);
 
         return ResponseEntity.ok(response);
     }
