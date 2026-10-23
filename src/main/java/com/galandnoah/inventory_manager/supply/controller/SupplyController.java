@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -28,7 +29,7 @@ public class SupplyController {
     @Operation(description = "Add supply")
     public ResponseEntity<SupplyResponse> create(
             @Valid @RequestBody SupplyRequest supplyRequest
-            ){
+    ) {
 
         log.info("POST /api/v1/supplies");
 
@@ -40,9 +41,11 @@ public class SupplyController {
     }
 
     @GetMapping
-    @Operation(description = "Find all supplies")
+    @Operation(description = "Find all supplies (paginated, page starts at 1)")
     public ResponseEntity<Page<SupplyResponse>> findAll(
-            @RequestParam("size") int size, @RequestParam("page") int page){
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "1") int page
+    ) {
 
         log.info("GET /api/v1/supplies?size={}&page={}", size, page);
 
@@ -52,17 +55,15 @@ public class SupplyController {
     }
 
     @GetMapping("/{date}")
-    @Operation(description = "Find by date")
+    @Operation(description = "Find supplies by date (format yyyy-MM-dd)")
     public ResponseEntity<List<SupplyResponse>> findByDate(
-            @PathVariable String date
-            )
-    {
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
 
         log.info("GET /api/v1/supplies/{}", date);
 
-        List<SupplyResponse> supplies = supplyService.findByDate(LocalDate.parse(date));
+        List<SupplyResponse> supplies = supplyService.findByDate(date);
 
         return ResponseEntity.ok(supplies);
     }
-
 }
