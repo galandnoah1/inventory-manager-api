@@ -1,5 +1,6 @@
 package com.galandnoah.inventory_manager.supply.service;
 
+import com.galandnoah.inventory_manager.exception.InvalidRequestException;
 import com.galandnoah.inventory_manager.product.dto.ProductRequest;
 import com.galandnoah.inventory_manager.product.dto.ProductResponse;
 import com.galandnoah.inventory_manager.product.entity.Product;
@@ -21,6 +22,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -29,7 +31,12 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class SupplyServiceImpl implements SupplyService{
+public class SupplyServiceImpl implements SupplyService {
+
+    // TODO: replace with the authenticated user once security is added
+    private static final String DEFAULT_MADE_BY = "Maman";
+    private static final int DEFAULT_THRESHOLD = 10;
+
     private final SupplyRepository supplyRepository;
     private final ProductServiceImpl productService;
     private final SupplyMapper supplyMapper;
@@ -43,68 +50,84 @@ public class SupplyServiceImpl implements SupplyService{
             "products",
             "supplies",
             "allSupplies"
-    }, allEntries = true
-    )
+    }, allEntries = true)
     public SupplyResponse createSupply(SupplyRequest supplyRequest) {
 
-        log.info("Create supply. Product: {}", supplyRequest.designation());
+        log.info("Create supply. productId: {}, designation: {}",
+                supplyRequest.productId(), supplyRequest.designation());
 
-        if (supplyRequest.productId() == null && supplyRequest.designation() == null)
+        boolean hasProduct = supplyRequest.productId() != null;
+        boolean hasDesignation = StringUtils.hasText(supplyRequest.designation());
+
+        if (!hasProduct && !hasDesignation)
         {
-            log.warn("productId and designation are nullable");
-            throw new RuntimeException("Either select product or enter designation");
+            log.warn("productId and designation are both missing");
+            throw new InvalidRequestException("Either select product or enter designation");
         }
 
-        if(supplyRequest.productId() != null && supplyRequest.designation() != null)
+        if (hasProduct && hasDesignation)
         {
-            log.warn("productId and designation are both not null value");
-            throw new RuntimeException("Either select product or enter designation, not both");
+            log.warn("productId and designation are both provided");
+            throw new InvalidRequestException("Either select product or enter designation, not both");
         }
+
+        if (supplyRequest.qty() <= 0)
+        {
+            throw new InvalidRequestException("Quantity must be positive");
+        }
+
+        if (supplyRequest.cost() < 0)
+        {
+            throw new InvalidRequestException("Cost cannot be negative");
+        }
+
+        if (hasDesignation && (supplyRequest.sellingPrice() == null || supplyRequest.sellingPrice() < 0))
+        {
+            throw new InvalidRequestException("Selling price is required for a new product and cannot be negative");
+        }
+
+        double purchasePrice = (double) Math.round(supplyRequest.cost() / (double) supplyRequest.qty());
 
         Supply supply = supplyMapper.toEntity(supplyRequest);
 
-        double purchasePrice = supplyRequest.cost() / (double) supplyRequest.qty();
-
-        purchasePrice = Double.parseDouble(String.valueOf(Math.round(purchasePrice)));
-
-        if (supplyRequest.productId() != null){
-
+        if (hasProduct)
+        {
             Integer productId = supplyRequest.productId();
 
-            productService.incrementStock(productId, supplyRequest.qty());
+            Product product = productRepository.findById(productId)
+                    .orElseThrow(() -> {
+                        log.warn("Product not found: {}", productId);
+                        return new EntityNotFoundException("Product not found with id: " + productId);
+                    });
 
+            productService.incrementStock(productId, supplyRequest.qty());
             productService.setPurchasePrice(productId, purchasePrice);
 
-
-            Product product = productRepository.findById(productId)
-                    .orElseThrow(()-> new EntityNotFoundException("Product not found"));
-
             supply.setProduct(product);
-
         }
-
-        if (supplyRequest.designation() != null)
+        else
         {
             ProductRequest productRequest = new ProductRequest(
-                    supplyRequest.designation(),
+                    supplyRequest.designation().trim(),
                     supplyRequest.sellingPrice(),
                     purchasePrice,
                     supplyRequest.qty(),
-                    10
+                    DEFAULT_THRESHOLD
             );
 
+            // Throws DuplicateResourceException if the designation already exists
             ProductResponse productResponse = productService.createProduct(productRequest);
 
             Product product = productRepository.findById(productResponse.getId())
-                    .orElseThrow(()-> new EntityNotFoundException("Product not found"));
-
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "Product not found with id: " + productResponse.getId()));
 
             supply.setProduct(product);
-
         }
 
         supply.setCreated(LocalDate.now());
-        supply.setMadeBy("Maman");
+        supply.setMadeBy(DEFAULT_MADE_BY);
+
         Supply saved = supplyRepository.save(supply);
 
         log.info("Supply created with success");
@@ -114,24 +137,35 @@ public class SupplyServiceImpl implements SupplyService{
 
 
     @Override
-    @Cacheable(value = "allSupplies", key = "#page")
+    @Cacheable(value = "allSupplies", key = "#page + '-' + #size")
     public Page<SupplyResponse> findAll(int size, int page) {
-        log.info("Find all supplies");
+
+        log.info("Find all supplies. page: {}, size: {}", page, size);
+
+        if (page < 1)
+        {
+            throw new InvalidRequestException("Page must be greater than or equal to 1");
+        }
+
+        if (size < 1)
+        {
+            throw new InvalidRequestException("Size must be greater than or equal to 1");
+        }
 
         Sort sort = Sort.by("created").ascending();
 
-        Pageable pageable = PageRequest.of(size, page, sort);
+        // Spring Data pages are 0-based, the API is 1-based like products and sales
+        Pageable pageable = PageRequest.of(page - 1, size, sort);
 
-        Page<Supply> supplies = supplyRepository.findAll(pageable);
-
-        return supplies.map(supplyMapper::toResponse);
+        return supplyRepository.findAll(pageable)
+                .map(supplyMapper::toResponse);
     }
 
     @Override
     @Cacheable(value = "supplies", key = "#date")
     public List<SupplyResponse> findByDate(LocalDate date) {
 
-        log.info("Find supplies by date");
+        log.info("Find supplies by date: {}", date);
 
         return supplyRepository.findByCreated(date)
                 .stream()
