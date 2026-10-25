@@ -213,36 +213,20 @@ Toute écriture vide l'intégralité des caches concernés (`allEntries = true`)
 
 ### Prérequis
 
-- JDK 21
-- Maven 
-- Une base de données relationnelle (à configurer dans `application.yaml`)
+- [Docker](https://docs.docker.com/get-docker/) 
+
 
 ### Configuration
 
-Exemple de `src/main/resources/application.yaml` (à adapter à votre base) :
+Créez votre fichier d'environnement à partir du modèle, puis renseignez les valeurs (notamment les mots de passe) :
 
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/inventory_manager
-spring.datasource.username=votre_utilisateur
-spring.datasource.password=votre_mot_de_passe
-
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=false
+```bash
+cp .env.example .env
 ```
+
 
 ### Lancer l'application
 
 ```bash
-# Maven
-./mvnw spring-boot:run
-
+docker compose up --build
 ```
-
-L'API est alors disponible sur `http://localhost:8080`.
-
-### Documentation Swagger
-
-Une fois l'application lancée : `http://localhost:8080/swagger-ui/index.html`
-
----
-
