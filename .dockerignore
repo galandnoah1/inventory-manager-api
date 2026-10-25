@@ -1,0 +1,33 @@
+# Build
+target/
+build/
+.gradle/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Secrets et config locale
+.env
+*.pem
+*.key
+application-local.yml
+
+# Divers
+*.log
+.DS_Store
+README.md
